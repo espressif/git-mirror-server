@@ -1,10 +1,10 @@
 services:
   git-mirror:
-    image: kumekay/git-mirror
+    image: espressif/git-mirror:1
     ports:
-      - "8080:8080"
-    command: ["/etc/git-mirror/config.toml"]
+      - "6688:6688"
+    command: ["/config/config.toml"]
     volumes:
-      - /opt/git-mirror/data:/git-mirror
-      - /opt/git-mirror/config:/etc/git-mirror
+      - /opt/git-mirror/data:/data
+      - /opt/git-mirror/config:/config
     restart: always
