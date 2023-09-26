@@ -12,7 +12,7 @@ func mirror(cfg config, r repo) (string, error) {
 	outStr := ""
 	if _, err := os.Stat(repoPath); err == nil {
 		// Directory exists, update.
-		cmd := exec.Command("git", "remote", "update")
+		cmd := exec.Command("git", "remote", "update", "--prune")
 		cmd.Dir = repoPath
 		out, err := cmd.CombinedOutput()
 		outStr = string(out)
