@@ -28,18 +28,12 @@ func mirror(cfg config, r repo) (string, error) {
 		cmd := exec.Command("git", "clone", "--mirror", r.Origin, repoPath)
 		cmd.Dir = parent
 		out, err := cmd.CombinedOutput()
-		outStr = string(out)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "failed to clone %s, %s", r.Origin, err)
 		}
 		return string(out), err
 	} else {
 		return "", fmt.Errorf("failed to stat %s, %s", repoPath, err)
-	}
-	cmd := exec.Command("git", "update-server-info")
-	cmd.Dir = repoPath
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("failed to update-server-info for %s, %s", repoPath, err)
 	}
 	return outStr, nil
 }
