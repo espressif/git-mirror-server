@@ -1,0 +1,124 @@
+name: Test and Build
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Verify dependencies
+      run: go mod verify
+
+    - name: Build
+      run: go build -v ./...
+
+    - name: Run tests
+      run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+
+    - name: Run go vet
+      run: go vet ./...
+
+    - name: Run go fmt
+      run: |
+        if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+          echo "Code is not formatted properly:"
+          gofmt -s -l .
+          exit 1
+        fi
+
+  docker_and_integration_tests:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        load: true
+        tags: git-mirror-server:dev
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Test Docker image
+      run: |
+        # Start the container in background
+        docker run -d --name git-mirror-test \
+          -v ${{ github.workspace }}/example-config.toml:/config.toml \
+          git-mirror-server:dev /config.toml
+
+        # Wait a bit for the server to start
+        sleep 5
+
+        # Check if container is still running
+        if ! docker ps | grep git-mirror-test; then
+          echo "Container failed to start"
+          docker logs git-mirror-test
+          exit 1
+        fi
+
+        # Stop the container
+        docker stop git-mirror-test
+        docker rm git-mirror-test
+
+    - name: Create test config for integration
+      run: |
+        cat > test-config.toml << EOF
+        ListenAddr = ":8080"
+        BasePath = "/srv/git"
+        Interval = "10s" # Default update interval for repos
+
+        [[repo]]
+        Name = "github.com/espressif/git-mirror-server.git" # Explicitly set name
+        Origin = "https://github.com/espressif/git-mirror-server.git"
+        # Interval = "10s" # Specific interval for this repo (optional)
+        EOF
+
+    - name: Run integration test
+      run: |
+        # Start git-mirror-server
+        docker run -d --name git-mirror-integration \
+          -p 8080:8080 \
+          -v ${{ github.workspace }}/test-config.toml:/config.toml \
+          -v ${{ github.workspace }}/test-git-repos:/srv/git \
+          git-mirror-server:dev /config.toml
+
+        # Wait for server to start and first sync
+        echo "Waiting for server to start and initial sync..."
+        sleep 30 # Increased sleep to allow for cloning and initial setup
+
+        # Check container logs for any immediate errors
+        echo "Git mirror server logs:"
+        docker logs git-mirror-integration
+
+        # Test git clone
+        echo "Testing git clone..."
+        GIT_TRACE_PACKET=1 GIT_TRACE=1 GIT_CURL_VERBOSE=1 git clone --depth 1 http://localhost:8080/github.com/espressif/git-mirror-server.git test-clone
+        cd test-clone
+        git log -1 --oneline
