@@ -1,4 +1,4 @@
-FROM golang:1.21 as builder
+FROM golang:1.23 AS builder
 WORKDIR /app
 
 COPY go.mod ./
@@ -8,8 +8,8 @@ RUN go mod download
 COPY *.go ./
 RUN go build -o /git-mirror
 
-FROM alpine/git
-RUN apk add --no-cache libc6-compat
+FROM alpine:latest
+RUN apk add --no-cache git git-daemon libc6-compat
 WORKDIR /
 COPY --from=builder /git-mirror git-mirror
 ENTRYPOINT [ "/git-mirror" ]

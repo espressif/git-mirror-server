@@ -13,7 +13,7 @@ import (
 func main() {
 	// Parse config.
 	if len(os.Args) != 2 {
-		log.Fatal("please specify the path to a config file, an example config is available at https://github.com/beefsack/git-mirror/blob/master/example-config.toml")
+		log.Fatal("please specify the path to a config file, an example config is available at https://github.com/espressif/git-mirror-server/blob/master/example-config.toml")
 	}
 	cfg, repos, err := parseConfig(os.Args[1])
 	if err != nil {
