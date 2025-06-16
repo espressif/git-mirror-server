@@ -3,6 +3,7 @@
 `git-mirror` is designed to create and serve read-only mirrors of your Git repositories locally or wherever you choose.
 The server uses Git's smart HTTP protocol via `git http-backend` to provide efficient repository access.
 
+
 A major design goal of `git-mirror` is that it should just work with as little configuration as possible.
 
 ## Get started
@@ -37,10 +38,13 @@ Checking connectivity... done.
 
 ## Using with docker
 
+The docker image is available on Docker Hub [espressif/git-mirror](https://hub.docker.com/r/espressif/git-mirror)
+
+
 You can run it with docker:
 
 ```
-docker run --rm -ti -v /your_config/path:/config espressif/git-mirror-server /config/config.toml
+docker run --rm -ti -v /your_config/path:/config espressif/git-mirror /config/config.toml
 ```
 
 Or with docker compose, for example:
@@ -48,7 +52,7 @@ Or with docker compose, for example:
 ```
 services:
   git-mirror:
-    image: espressif/git-mirror-server
+    image: espressif/git-mirror
     ports:
       - "8080:8080"
     command: ["/etc/git-mirror/config.toml"]
