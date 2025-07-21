@@ -45,23 +45,17 @@ func main() {
 	}
 
 	// Set up git http-backend CGI handler
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// Set the required environment variables for git http-backend
-		env := []string{
+	gitBackend := &cgi.Handler{
+		Path: "/usr/bin/git",
+		Args: []string{"http-backend"},
+		Dir:  cfg.BasePath,
+		Env: []string{
 			"GIT_PROJECT_ROOT=" + cfg.BasePath,
 			"GIT_HTTP_EXPORT_ALL=true",
-		}
+		},
+	}
 
-		// Create a new CGI handler for git http-backend
-		gitBackend := &cgi.Handler{
-			Path: "/usr/bin/git",
-			Args: []string{"http-backend"},
-			Dir:  cfg.BasePath,
-			Env:  env,
-		}
-
-		gitBackend.ServeHTTP(w, r)
-	})
+	http.HandleFunc("/", gitBackend.ServeHTTP)
 
 	log.Printf("starting git HTTP server on %s", cfg.ListenAddr)
 	if err := http.ListenAndServe(cfg.ListenAddr, nil); err != nil {
