@@ -10,7 +10,7 @@ BasePath = "/opt/git-mirror/data"
 # An example of a public mirror taking defaults from above.  The Name is
 # generated from the URL by just taking the host and path.
 #
-# Will be mirrored at at http://localhost:8080/github.com/espressif/git-mirror-server.git
+# Will be mirrored at http://localhost:8080/github.com/espressif/git-mirror-server.git
 [[Repo]]
 Origin = "https://github.com/espressif/git-mirror-server.git"
 
