@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -16,10 +16,11 @@ type duration struct {
 }
 
 type config struct {
-	ListenAddr string
-	Interval   duration
-	BasePath   string
-	Repo       []repo
+	ListenAddr     string
+	Interval       duration
+	BitmapInterval duration
+	BasePath       string
+	Repo           []repo
 }
 
 type repo struct {
@@ -35,7 +36,7 @@ func (d *duration) UnmarshalText(text []byte) (err error) {
 
 func parseConfig(filename string) (cfg config, repos map[string]repo, err error) {
 	// Parse the raw TOML file.
-	raw, err := ioutil.ReadFile(filename)
+	raw, err := os.ReadFile(filename)
 	if err != nil {
 		err = fmt.Errorf("unable to read config file %s, %s", filename, err)
 		return
@@ -52,6 +53,9 @@ func parseConfig(filename string) (cfg config, repos map[string]repo, err error)
 	if cfg.Interval.Duration == 0 {
 		cfg.Interval.Duration = time.Minute
 	}
+	if cfg.BitmapInterval.Duration == 0 {
+		cfg.BitmapInterval.Duration = 10 * time.Hour
+	}
 	if cfg.BasePath == "" {
 		cfg.BasePath = "."
 	}
@@ -60,14 +64,14 @@ func parseConfig(filename string) (cfg config, repos map[string]repo, err error)
 	}
 
 	// Fetch repos, injecting default values where needed.
-	if cfg.Repo == nil || len(cfg.Repo) == 0 {
+	if len(cfg.Repo) == 0 {
 		err = fmt.Errorf("no repos found in config %s, please define repos under [[repo]] sections", filename)
 		return
 	}
 	repos = map[string]repo{}
 	for i, r := range cfg.Repo {
 		if r.Origin == "" {
-			err = fmt.Errorf("Origin required for repo %d in config %s", i+1, filename)
+			err = fmt.Errorf("origin required for repo %d in config %s", i+1, filename)
 			return
 		}
 
@@ -83,10 +87,10 @@ func parseConfig(filename string) (cfg config, repos map[string]repo, err error)
 			}
 		}
 		if r.Name == "" {
-			err = fmt.Errorf("Could not generate name for Origin %s in config %s, please manually specify a Name", r.Origin, filename)
+			err = fmt.Errorf("could not generate name for Origin %s in config %s, please manually specify a Name", r.Origin, filename)
 		}
 		if _, ok := repos[r.Name]; ok {
-			err = fmt.Errorf("Multiple repos with name %s in config %s", r.Name, filename)
+			err = fmt.Errorf("multiple repos with name %s in config %s", r.Name, filename)
 			return
 		}
 
