@@ -117,6 +117,12 @@ jobs:
         echo "Git mirror server logs:"
         docker logs git-mirror-integration
 
+        # Check for any errors in logs
+        if docker logs git-mirror-integration | grep -i "error"; then
+          echo "Errors found in logs"
+          exit 1
+        fi
+
         # Test git clone
         echo "Testing git clone..."
         GIT_TRACE_PACKET=1 GIT_TRACE=1 GIT_CURL_VERBOSE=1 git clone --depth 1 http://localhost:8080/github.com/espressif/git-mirror-server.git test-clone

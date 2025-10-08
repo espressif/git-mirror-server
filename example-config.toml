@@ -4,6 +4,9 @@ ListenAddr = ":8080"
 # Interval is the default interval for updating mirrors, can be overridden per
 # repo.  Defaults to 15 seconds.
 Interval = "15m"
+# BitmapInterval is the default interval for rebuilding git bitmaps.
+# Defaults to 10 hours. It is a global setting only.
+BitmapInterval = "10h"
 # Base path for storing mirrors, absolute or relative.  Defaults to "."
 BasePath = "/opt/git-mirror/data"
 

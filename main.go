@@ -44,6 +44,21 @@ func main() {
 		}(r)
 	}
 
+	// Run full repack with bitmap generation once in a while
+	go func() {
+		for {
+			time.Sleep(cfg.BitmapInterval.Duration)
+			for _, r := range repos {
+				log.Printf("updating bitmap for %s", r.Name)
+				if err := refreshBitmapIndex(cfg, r); err != nil {
+					log.Printf("error updating bitmap for %s: %s", r.Name, err)
+				} else {
+					log.Printf("bitmap updated for %s", r.Name)
+				}
+			}
+		}
+	}()
+
 	// Set up git http-backend CGI handler
 	gitBackend := &cgi.Handler{
 		Path: "/usr/bin/git",
