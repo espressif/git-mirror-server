@@ -70,7 +70,17 @@ func main() {
 		},
 	}
 
-	http.HandleFunc("/", gitBackend.ServeHTTP)
+	// Create a semaphore to limit concurrent connections
+	semaphore := make(chan struct{}, cfg.MaxConcurrentConnections)
+
+	// Wrap the handler with concurrent connection limiting
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Acquire semaphore
+		semaphore <- struct{}{}
+		defer func() { <-semaphore }()
+
+		gitBackend.ServeHTTP(w, r)
+	})
 
 	log.Printf("starting git HTTP server on %s", cfg.ListenAddr)
 	if err := http.ListenAndServe(cfg.ListenAddr, nil); err != nil {

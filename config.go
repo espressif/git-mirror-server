@@ -16,11 +16,12 @@ type duration struct {
 }
 
 type config struct {
-	ListenAddr     string
-	Interval       duration
-	BitmapInterval duration
-	BasePath       string
-	Repo           []repo
+	ListenAddr               string
+	Interval                 duration
+	BitmapInterval           duration
+	BasePath                 string
+	MaxConcurrentConnections int
+	Repo                     []repo
 }
 
 type repo struct {
@@ -61,6 +62,11 @@ func parseConfig(filename string) (cfg config, repos map[string]repo, err error)
 	}
 	if cfg.BasePath, err = filepath.Abs(cfg.BasePath); err != nil {
 		err = fmt.Errorf("unable to get absolute path to base path, %s", err)
+	}
+
+	// Set a default max concurrent connections if not specified
+	if cfg.MaxConcurrentConnections <= 0 {
+		cfg.MaxConcurrentConnections = 32
 	}
 
 	// Fetch repos, injecting default values where needed.
