@@ -10,6 +10,10 @@ BitmapInterval = "10h"
 # Base path for storing mirrors, absolute or relative.  Defaults to "."
 BasePath = "/opt/git-mirror/data"
 
+# MaxConcurrentConnections limits the number of concurrent HTTP connections.
+# Defaults to 32 if not specified.
+MaxConcurrentConnections = 32
+
 # An example of a public mirror taking defaults from above.  The Name is
 # generated from the URL by just taking the host and path.
 #
