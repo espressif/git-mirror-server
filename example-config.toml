@@ -1,12 +1,19 @@
 # ListenAddr is the address the web server listens on for serving the mirrors.
 # Defaults to :8080
 ListenAddr = ":8080"
+
 # Interval is the default interval for updating mirrors, can be overridden per
-# repo.  Defaults to 15 seconds.
+# repo.  Defaults to 15 minutes.
 Interval = "15m"
-# BitmapInterval is the default interval for rebuilding git bitmaps.
-# Defaults to 10 hours. It is a global setting only.
-BitmapInterval = "10h"
+
+# MultiPackIndexInterval is the number of fetches after which to refresh the
+# multi-pack index. Disabled by default (0). Can be overridden per repo.
+MultiPackIndexInterval = 10
+
+# BitmapIndexInterval is the number of fetches after which to rebuild the
+# bitmap index with full repack. Disabled by default (0). Can be overridden per repo.
+BitmapIndexInterval = 50
+
 # Base path for storing mirrors, absolute or relative.  Defaults to "."
 BasePath = "/opt/git-mirror/data"
 
@@ -21,9 +28,12 @@ MaxConcurrentConnections = 32
 [[Repo]]
 Origin = "https://github.com/espressif/git-mirror-server.git"
 
-# It is also possible to set custom names for accessing the repos.
-#
+# It is also possible to set custom names and custom intervals for accessing the repos.
 # Will be mirrored at http://localhost:8080/custom-name
 [[Repo]]
 Name = "custom-name"
 Origin = "git@github.com:toml-lang/toml.git"
+# Optional: Override default intervals for this specific repo
+# Interval = "10m"
+# MultiPackIndexInterval = 5
+# BitmapIndexInterval = 25

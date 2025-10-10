@@ -6,11 +6,30 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"sync"
 )
+
+// Counter tracks fetch counts for each repo
+type repoCounter struct {
+	mu         sync.Mutex
+	fetchCount uint64
+}
+
+var repoCounters = make(map[string]*repoCounter)
+var repoCountersMu sync.Mutex
 
 func mirror(cfg config, r repo) (string, error) {
 	repoPath := path.Join(cfg.BasePath, r.Name)
 	outStr := ""
+
+	// Initialize counter for this repo if it doesn't exist
+	repoCountersMu.Lock()
+	if repoCounters[r.Name] == nil {
+		repoCounters[r.Name] = &repoCounter{}
+	}
+	counter := repoCounters[r.Name]
+	repoCountersMu.Unlock()
+
 	if _, err := os.Stat(repoPath); err == nil {
 		// Directory exists, update.
 		cmd := exec.Command("git", "remote", "update", "--prune")
@@ -20,11 +39,7 @@ func mirror(cfg config, r repo) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("failed to update remote in %s: %w", repoPath, err)
 		}
-		if err := refreshMultiPackIndex(cfg, r); err != nil {
-			log.Printf("error refreshing multi-pack index for %s: %s", r.Name, err)
-		} else {
-			log.Printf("successfully refreshed multi-pack index for %s", r.Name)
-		}
+
 	} else if os.IsNotExist(err) {
 		// Clone
 		parent := path.Dir(repoPath)
@@ -37,15 +52,34 @@ func mirror(cfg config, r repo) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("failed to clone %s: %w", r.Origin, err)
 		}
-		if err := refreshBitmapIndex(cfg, r); err != nil {
-			log.Printf("error refreshing bitmap index for %s: %s", r.Name, err)
-		} else {
-			log.Printf("successfully refreshed bitmap index for %s", r.Name)
-		}
 		return string(out), err
 	} else {
 		return "", fmt.Errorf("failed to stat %s, %s", repoPath, err)
 	}
+
+	// Check if we need to run multi-pack index
+	if r.MultiPackIndexInterval > 0 && counter.fetchCount%uint64(r.MultiPackIndexInterval) == 0 {
+		if err := refreshMultiPackIndex(cfg, r); err != nil {
+			log.Printf("error refreshing multi-pack index for %s: %s", r.Name, err)
+		} else {
+			log.Printf("successfully refreshed multi-pack index for %s (fetch #%d)", r.Name, counter.fetchCount)
+		}
+	}
+
+	// Check if we need to run bitmap index
+	if r.BitmapIndexInterval > 0 && counter.fetchCount%uint64(r.BitmapIndexInterval) == 0 {
+		if err := refreshBitmapIndex(cfg, r); err != nil {
+			log.Printf("error refreshing bitmap index for %s: %s", r.Name, err)
+		} else {
+			log.Printf("successfully refreshed bitmap index for %s (fetch #%d)", r.Name, counter.fetchCount)
+		}
+	}
+
+	// Increment fetch counter (only on successful fetch)
+	counter.mu.Lock()
+	counter.fetchCount++
+	counter.mu.Unlock()
+
 	return outStr, nil
 }
 

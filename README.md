@@ -17,7 +17,7 @@ Create `config.toml` similar to:
 Origin = "https://github.com/espressif/git-mirror-server.git"
 ```
 
-By default it will update the mirror every **1 minute** and will serve the mirror over HTTP using port **8080**. You can specify as many repos as you want by having multiple `[[repo]]` sections.
+By default it will update the mirror every **15 minutes** and will serve the mirror over HTTP using port **8080**. You can specify as many repos as you want by having multiple `[[repo]]` sections.
 
 Run `git-mirror` with the path to the config file:
 
@@ -62,9 +62,39 @@ services:
     restart: always
 ```
 
-## Advanced configuration
+## Configuration Options
 
-See [the example config](example-config.toml) for more advanced configurations.
+### Global Settings
+
+- **`ListenAddr`** (string, default: `:8080`) - The address and port the web server listens on for serving mirrors
+- **`Interval`** (duration, default: `15m`) - Default interval for updating mirrors; can be overridden per repository
+- **`BasePath`** (string, default: `.`) - Base path for storing mirror data, can be absolute or relative
+- **`MaxConcurrentConnections`** (int, default: `32`) - Limits the number of concurrent HTTP connections to prevent overload
+- **`MultiPackIndexInterval`** (int, default: `0`) - Number of fetches after which to refresh the multi-pack index; Disabled by default (`0`)
+- **`BitmapIndexInterval`** (int, default: `0`) - Number of fetches after which to rebuild the bitmap index with full repack; Disabled by default (`0`)
+
+### Repository Settings
+
+Each `[[Repo]]` section supports:
+
+- **`Origin`** (string, required) - The URL of the repository to mirror (supports HTTPS and SSH)
+- **`Name`** (string, optional) - Custom name for accessing the mirror; auto-generated from Origin if not specified
+- **`Interval`** (duration, optional) - Override the global update interval for this specific repository
+- **`MultiPackIndexInterval`** (int, optional) - Override the global multi-pack index refresh interval for this repository
+- **`BitmapIndexInterval`** (int, optional) - Override the global bitmap index rebuild interval for this repository
+
+### Performance Optimization
+
+The server uses two index refresh strategies:
+
+1. **Multi-pack index** - Lightweight operation that improves fetch performance without repacking. Runs more frequently (default: 0, disabled).
+2. **Bitmap index** - Full repack with bitmap generation for maximum performance. More resource-intensive, runs less frequently (default: 0, disabled).
+
+Both can be disabled per repository by setting their interval to `0`, or customized based on repository size and usage patterns.
+
+### Example Configuration
+
+See [the example config](example-config.toml) for a complete configuration example.
 
 ## Authentication and authorization
 

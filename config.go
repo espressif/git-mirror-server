@@ -18,16 +18,19 @@ type duration struct {
 type config struct {
 	ListenAddr               string
 	Interval                 duration
-	BitmapInterval           duration
+	MultiPackIndexInterval   int
+	BitmapIndexInterval      int
 	BasePath                 string
 	MaxConcurrentConnections int
 	Repo                     []repo
 }
 
 type repo struct {
-	Name     string
-	Origin   string
-	Interval duration
+	Name                   string
+	Origin                 string
+	Interval               duration
+	MultiPackIndexInterval int
+	BitmapIndexInterval    int
 }
 
 func (d *duration) UnmarshalText(text []byte) (err error) {
@@ -52,10 +55,13 @@ func parseConfig(filename string) (cfg config, repos map[string]repo, err error)
 		cfg.ListenAddr = ":8080"
 	}
 	if cfg.Interval.Duration == 0 {
-		cfg.Interval.Duration = time.Minute
+		cfg.Interval.Duration = 15 * time.Minute
 	}
-	if cfg.BitmapInterval.Duration == 0 {
-		cfg.BitmapInterval.Duration = 10 * time.Hour
+	if cfg.MultiPackIndexInterval < 0 {
+		cfg.MultiPackIndexInterval = 0
+	}
+	if cfg.BitmapIndexInterval < 0 {
+		cfg.BitmapIndexInterval = 0
 	}
 	if cfg.BasePath == "" {
 		cfg.BasePath = "."
@@ -102,6 +108,12 @@ func parseConfig(filename string) (cfg config, repos map[string]repo, err error)
 
 		if r.Interval.Duration == 0 {
 			r.Interval.Duration = cfg.Interval.Duration
+		}
+		if r.MultiPackIndexInterval < 0 {
+			r.MultiPackIndexInterval = cfg.MultiPackIndexInterval
+		}
+		if r.BitmapIndexInterval < 0 {
+			r.BitmapIndexInterval = cfg.BitmapIndexInterval
 		}
 		repos[r.Name] = r
 	}
