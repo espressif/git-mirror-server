@@ -6,11 +6,30 @@ import (
 	"net/http"
 	"net/http/cgi"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 )
 
 func main() {
+	// Set up signal handler to reap zombie processes
+	// This prevents git processes spawned by CGI handler from becoming zombies
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGCHLD)
+	go func() {
+		for range sigChan {
+			// Reap all zombie children
+			for {
+				var status syscall.WaitStatus
+				pid, err := syscall.Wait4(-1, &status, syscall.WNOHANG, nil)
+				if err != nil || pid <= 0 {
+					break
+				}
+			}
+		}
+	}()
+
 	// Parse config.
 	if len(os.Args) != 2 {
 		log.Fatal("please specify the path to a config file, an example config is available at https://github.com/espressif/git-mirror-server/blob/master/example-config.toml")
