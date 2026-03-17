@@ -57,21 +57,17 @@ func mirror(cfg config, r repo) (string, error) {
 		return "", fmt.Errorf("failed to stat %s, %s", repoPath, err)
 	}
 
-	// Check if we need to run multi-pack index
+	// Commit-graph is cheap and safe to run after every fetch
+	if err := refreshCommitGraph(cfg, r); err != nil {
+		log.Printf("error refreshing commit-graph for %s: %s", r.Name, err)
+	}
+
+	// Multi-pack-index with bitmap runs every N fetches
 	if r.MultiPackIndexInterval > 0 && counter.fetchCount%uint64(r.MultiPackIndexInterval) == 0 {
 		if err := refreshMultiPackIndex(cfg, r); err != nil {
 			log.Printf("error refreshing multi-pack index for %s: %s", r.Name, err)
 		} else {
 			log.Printf("successfully refreshed multi-pack index for %s (fetch #%d)", r.Name, counter.fetchCount)
-		}
-	}
-
-	// Check if we need to run bitmap index
-	if r.BitmapIndexInterval > 0 && counter.fetchCount%uint64(r.BitmapIndexInterval) == 0 {
-		if err := refreshBitmapIndex(cfg, r); err != nil {
-			log.Printf("error refreshing bitmap index for %s: %s", r.Name, err)
-		} else {
-			log.Printf("successfully refreshed bitmap index for %s (fetch #%d)", r.Name, counter.fetchCount)
 		}
 	}
 
@@ -83,21 +79,19 @@ func mirror(cfg config, r repo) (string, error) {
 	return outStr, nil
 }
 
-// Rebuild git bitmap index for the repo to speed up fetches once in a while
-func refreshBitmapIndex(cfg config, r repo) error {
+func refreshCommitGraph(cfg config, r repo) error {
 	repoPath := path.Join(cfg.BasePath, r.Name)
 
-	// Run git repack with bitmap index
-	repackCmd := exec.Command("git", "repack", "-Ad", "--write-bitmap-index", "--pack-kept-objects")
-	repackCmd.Dir = repoPath
-	if out, err := repackCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to repack %s: %s, output: %s", repoPath, err, string(out))
+	cmd := exec.Command("git", "commit-graph", "write", "--reachable")
+	cmd.Dir = repoPath
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to write commit-graph for %s: %s, output: %s", repoPath, err, string(out))
 	}
 
 	return nil
 }
 
-// Quickly write multi-pack-index with bitmap without full repack
+// Write multi-pack-index with bitmap across all packs without full repack
 func refreshMultiPackIndex(cfg config, r repo) error {
 	repoPath := path.Join(cfg.BasePath, r.Name)
 

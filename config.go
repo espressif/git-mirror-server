@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -19,7 +20,6 @@ type config struct {
 	ListenAddr               string
 	Interval                 duration
 	MultiPackIndexInterval   int
-	BitmapIndexInterval      int
 	BasePath                 string
 	MaxConcurrentConnections int
 	Repo                     []repo
@@ -30,7 +30,6 @@ type repo struct {
 	Origin                 string
 	Interval               duration
 	MultiPackIndexInterval int
-	BitmapIndexInterval    int
 }
 
 func (d *duration) UnmarshalText(text []byte) (err error) {
@@ -45,9 +44,17 @@ func parseConfig(filename string) (cfg config, repos map[string]repo, err error)
 		err = fmt.Errorf("unable to read config file %s, %s", filename, err)
 		return
 	}
-	if _, err = toml.Decode(string(raw), &cfg); err != nil {
+	md, err := toml.Decode(string(raw), &cfg)
+	if err != nil {
 		err = fmt.Errorf("unable to load config %s, %s", filename, err)
 		return
+	}
+
+	for _, key := range md.Undecoded() {
+		if key[len(key)-1] == "BitmapIndexInterval" {
+			log.Printf("warning: BitmapIndexInterval in %s is deprecated and has no effect; bitmap indexes are now managed via MultiPackIndexInterval using multi-pack-index", filename)
+			break
+		}
 	}
 
 	// Set defaults if required.
@@ -59,9 +66,6 @@ func parseConfig(filename string) (cfg config, repos map[string]repo, err error)
 	}
 	if cfg.MultiPackIndexInterval < 0 {
 		cfg.MultiPackIndexInterval = 0
-	}
-	if cfg.BitmapIndexInterval < 0 {
-		cfg.BitmapIndexInterval = 0
 	}
 	if cfg.BasePath == "" {
 		cfg.BasePath = "."
@@ -111,9 +115,6 @@ func parseConfig(filename string) (cfg config, repos map[string]repo, err error)
 		}
 		if r.MultiPackIndexInterval < 0 {
 			r.MultiPackIndexInterval = cfg.MultiPackIndexInterval
-		}
-		if r.BitmapIndexInterval < 0 {
-			r.BitmapIndexInterval = cfg.BitmapIndexInterval
 		}
 		repos[r.Name] = r
 	}

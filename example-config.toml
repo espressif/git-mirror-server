@@ -7,12 +7,10 @@ ListenAddr = ":8080"
 Interval = "15m"
 
 # MultiPackIndexInterval is the number of fetches after which to refresh the
-# multi-pack index. Disabled by default (0). Can be overridden per repo.
+# multi-pack-index with bitmap. This is safe for concurrent readers (atomic
+# file replacement, no pack deletion). Disabled by default (0).
+# Can be overridden per repo.
 MultiPackIndexInterval = 10
-
-# BitmapIndexInterval is the number of fetches after which to rebuild the
-# bitmap index with full repack. Disabled by default (0). Can be overridden per repo.
-BitmapIndexInterval = 50
 
 # Base path for storing mirrors, absolute or relative.  Defaults to "."
 BasePath = "/opt/git-mirror/data"
@@ -36,4 +34,3 @@ Origin = "git@github.com:toml-lang/toml.git"
 # Optional: Override default intervals for this specific repo
 # Interval = "10m"
 # MultiPackIndexInterval = 5
-# BitmapIndexInterval = 25
