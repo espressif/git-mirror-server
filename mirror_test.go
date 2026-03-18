@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -61,7 +63,7 @@ func TestRefreshCommitGraph(t *testing.T) {
 	}
 	gitCmd(t, filepath.Dir(bareDir), "clone", "--mirror", srcDir, bareDir)
 
-	if err := refreshCommitGraph(cfg, r); err != nil {
+	if err := refreshCommitGraph(context.Background(), cfg, r); err != nil {
 		t.Fatalf("refreshCommitGraph failed: %s", err)
 	}
 
@@ -81,7 +83,7 @@ func TestRefreshMultiPackIndex(t *testing.T) {
 	// Repack loose objects into a pack file so MIDX has something to index
 	gitCmd(t, bareDir, "repack", "-d")
 
-	if err := refreshMultiPackIndex(cfg, r); err != nil {
+	if err := refreshMultiPackIndex(context.Background(), cfg, r); err != nil {
 		t.Fatalf("refreshMultiPackIndex failed: %s", err)
 	}
 
@@ -95,7 +97,7 @@ func TestMirrorCreatesCommitGraphOnUpdate(t *testing.T) {
 	srcDir, cfg, r := setupTestEnv(t)
 
 	// First call: clone
-	if _, err := mirror(cfg, r); err != nil {
+	if _, err := mirror(context.Background(), cfg, r); err != nil {
 		t.Fatalf("initial mirror failed: %s", err)
 	}
 
@@ -103,7 +105,7 @@ func TestMirrorCreatesCommitGraphOnUpdate(t *testing.T) {
 	gitCmd(t, srcDir, "commit", "--allow-empty", "-m", "second")
 
 	// Second call: update
-	if _, err := mirror(cfg, r); err != nil {
+	if _, err := mirror(context.Background(), cfg, r); err != nil {
 		t.Fatalf("mirror update failed: %s", err)
 	}
 
@@ -114,12 +116,140 @@ func TestMirrorCreatesCommitGraphOnUpdate(t *testing.T) {
 	}
 }
 
+func TestHealthCheckRemovesLockFiles(t *testing.T) {
+	srcDir, cfg, r := setupTestEnv(t)
+	bareDir := filepath.Join(cfg.BasePath, r.Name)
+	if err := os.MkdirAll(filepath.Dir(bareDir), 0755); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, filepath.Dir(bareDir), "clone", "--mirror", srcDir, bareDir)
+
+	lockFiles := []string{
+		filepath.Join(bareDir, "objects", "info", "commit-graph.lock"),
+		filepath.Join(bareDir, "objects", "pack", "multi-pack-index.lock"),
+		filepath.Join(bareDir, "refs", "heads", "main.lock"),
+		filepath.Join(bareDir, "packed-refs.lock"),
+	}
+	for _, lf := range lockFiles {
+		if err := os.MkdirAll(filepath.Dir(lf), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(lf, []byte{}, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	repos := map[string]repo{r.Name: r}
+	healthCheck(cfg, repos)
+
+	for _, lf := range lockFiles {
+		if _, err := os.Stat(lf); !os.IsNotExist(err) {
+			t.Fatalf("lock file %s should have been removed", lf)
+		}
+	}
+	if _, err := os.Stat(bareDir); os.IsNotExist(err) {
+		t.Fatal("valid repo directory should not be removed")
+	}
+}
+
+func TestHealthCheckRemovesCorruptedRepo(t *testing.T) {
+	_, cfg, r := setupTestEnv(t)
+	bareDir := filepath.Join(cfg.BasePath, r.Name)
+	if err := os.MkdirAll(bareDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Just a directory with a file — not a valid git repo
+	if err := os.WriteFile(filepath.Join(bareDir, "garbage"), []byte("not a repo"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	repos := map[string]repo{r.Name: r}
+	healthCheck(cfg, repos)
+
+	if _, err := os.Stat(bareDir); !os.IsNotExist(err) {
+		t.Fatal("corrupted repo directory should have been removed")
+	}
+}
+
+func TestHealthCheckFsckFailure(t *testing.T) {
+	srcDir, cfg, r := setupTestEnv(t)
+	bareDir := filepath.Join(cfg.BasePath, r.Name)
+	if err := os.MkdirAll(filepath.Dir(bareDir), 0755); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, filepath.Dir(bareDir), "clone", "--mirror", srcDir, bareDir)
+
+	// Corrupt the repo by removing all loose objects so fsck finds missing objects.
+	// HEAD and refs remain valid so rev-parse still passes.
+	objectsDir := filepath.Join(bareDir, "objects")
+	entries, err := os.ReadDir(objectsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if len(e.Name()) == 2 {
+			if err := os.RemoveAll(filepath.Join(objectsDir, e.Name())); err != nil {
+				t.Fatalf("failed to remove object dir %s: %s", e.Name(), err)
+			}
+		}
+	}
+	packDir := filepath.Join(objectsDir, "pack")
+	packs, err := filepath.Glob(filepath.Join(packDir, "*.pack"))
+	if err != nil {
+		t.Fatalf("failed to glob pack files: %s", err)
+	}
+	for _, p := range packs {
+		if err := os.Remove(p); err != nil {
+			t.Fatalf("failed to remove pack file %s: %s", p, err)
+		}
+		idx := strings.TrimSuffix(p, ".pack") + ".idx"
+		if err := os.Remove(idx); err != nil {
+			t.Fatalf("failed to remove idx file %s: %s", idx, err)
+		}
+	}
+
+	repos := map[string]repo{r.Name: r}
+	healthCheck(cfg, repos)
+
+	if _, err := os.Stat(bareDir); !os.IsNotExist(err) {
+		t.Fatal("repo with fsck failure should have been removed")
+	}
+}
+
+func TestHealthCheckSkipsNonExistent(t *testing.T) {
+	_, cfg, r := setupTestEnv(t)
+	bareDir := filepath.Join(cfg.BasePath, r.Name)
+
+	repos := map[string]repo{r.Name: r}
+	healthCheck(cfg, repos)
+
+	if _, err := os.Stat(bareDir); !os.IsNotExist(err) {
+		t.Fatal("non-existent repo directory should not be created")
+	}
+}
+
+func TestHealthCheckValidRepo(t *testing.T) {
+	srcDir, cfg, r := setupTestEnv(t)
+	bareDir := filepath.Join(cfg.BasePath, r.Name)
+	if err := os.MkdirAll(filepath.Dir(bareDir), 0755); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, filepath.Dir(bareDir), "clone", "--mirror", srcDir, bareDir)
+
+	repos := map[string]repo{r.Name: r}
+	healthCheck(cfg, repos)
+
+	if _, err := os.Stat(bareDir); os.IsNotExist(err) {
+		t.Fatal("valid repo directory should still exist after health check")
+	}
+}
+
 func TestMirrorMultiPackIndexOnInterval(t *testing.T) {
 	srcDir, cfg, r := setupTestEnv(t)
 	r.MultiPackIndexInterval = 2
 
 	// Clone
-	if _, err := mirror(cfg, r); err != nil {
+	if _, err := mirror(context.Background(), cfg, r); err != nil {
 		t.Fatalf("initial mirror failed: %s", err)
 	}
 
@@ -130,7 +260,7 @@ func TestMirrorMultiPackIndexOnInterval(t *testing.T) {
 
 	// First update (fetchCount=0, 0%2==0 → writes MIDX)
 	gitCmd(t, srcDir, "commit", "--allow-empty", "-m", "second")
-	if _, err := mirror(cfg, r); err != nil {
+	if _, err := mirror(context.Background(), cfg, r); err != nil {
 		t.Fatalf("mirror update 1 failed: %s", err)
 	}
 	if _, err := os.Stat(midxPath); os.IsNotExist(err) {
@@ -144,7 +274,7 @@ func TestMirrorMultiPackIndexOnInterval(t *testing.T) {
 
 	// Second update (fetchCount=1, 1%2!=0 → should NOT write MIDX)
 	gitCmd(t, srcDir, "commit", "--allow-empty", "-m", "third")
-	if _, err := mirror(cfg, r); err != nil {
+	if _, err := mirror(context.Background(), cfg, r); err != nil {
 		t.Fatalf("mirror update 2 failed: %s", err)
 	}
 	if _, err := os.Stat(midxPath); !os.IsNotExist(err) {
