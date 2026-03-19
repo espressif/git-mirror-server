@@ -1,28 +1,115 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
-	"path"
+	"path/filepath"
+	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
-// Counter tracks fetch counts for each repo
 type repoCounter struct {
-	mu         sync.Mutex
-	fetchCount uint64
+	fetchCount atomic.Uint64
 }
 
 var repoCounters = make(map[string]*repoCounter)
 var repoCountersMu sync.Mutex
 
-func mirror(cfg config, r repo) (string, error) {
-	repoPath := path.Join(cfg.BasePath, r.Name)
+const maxLogOutput = 512
+const healthCheckTimeout = 10 * time.Minute
+
+func truncateOutput(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= maxLogOutput {
+		return s
+	}
+	return s[:maxLogOutput] + "... (truncated)"
+}
+
+// safeRepoPath returns the cleaned repo path and validates it stays within basePath.
+func safeRepoPath(basePath, name string) (string, error) {
+	p := filepath.Clean(filepath.Join(basePath, name))
+	rel, err := filepath.Rel(basePath, p)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("repo %s resolves outside base path", name)
+	}
+	return p, nil
+}
+
+func healthCheck(cfg config, repos map[string]repo) {
+	for name, r := range repos {
+		repoPath, err := safeRepoPath(cfg.BasePath, r.Name)
+		if err != nil {
+			log.Printf("warning: %s, skipping", err)
+			continue
+		}
+
+		if _, err := os.Stat(repoPath); os.IsNotExist(err) {
+			continue
+		}
+
+		removeLockFiles(repoPath, name)
+
+		ctx, cancel := context.WithTimeout(context.Background(), healthCheckTimeout)
+
+		cmd := exec.CommandContext(ctx, "git", "rev-parse", "--git-dir")
+		cmd.Dir = repoPath
+		if out, err := cmd.CombinedOutput(); err != nil {
+			cancel()
+			log.Printf("warning: %s is not a valid git repo (rev-parse failed: %s, output: %s), removing", name, err, truncateOutput(string(out)))
+			if err := os.RemoveAll(repoPath); err != nil {
+				log.Printf("error removing %s: %s", repoPath, err)
+			}
+			continue
+		}
+
+		cmd = exec.CommandContext(ctx, "git", "fsck", "--no-dangling", "--connectivity-only")
+		cmd.Dir = repoPath
+		if out, err := cmd.CombinedOutput(); err != nil {
+			cancel()
+			log.Printf("warning: %s failed fsck (%s, output: %s), removing", name, err, truncateOutput(string(out)))
+			if err := os.RemoveAll(repoPath); err != nil {
+				log.Printf("error removing %s: %s", repoPath, err)
+			}
+			continue
+		}
+
+		cancel()
+		log.Printf("health check passed for %s", name)
+	}
+}
+
+func removeLockFiles(repoPath string, name string) {
+	if err := filepath.WalkDir(repoPath, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			log.Printf("error accessing %s during lock cleanup: %s", p, err)
+			return nil
+		}
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".lock") {
+			log.Printf("removing stale lock file %s in %s", p, name)
+			if err := os.Remove(p); err != nil {
+				log.Printf("error removing lock file %s: %s", p, err)
+			}
+		}
+		return nil
+	}); err != nil {
+		log.Printf("error walking directory %s: %s", repoPath, err)
+	}
+}
+
+func mirror(ctx context.Context, cfg config, r repo) (string, error) {
+	repoPath, err := safeRepoPath(cfg.BasePath, r.Name)
+	if err != nil {
+		return "", err
+	}
 	outStr := ""
 
-	// Initialize counter for this repo if it doesn't exist
 	repoCountersMu.Lock()
 	if repoCounters[r.Name] == nil {
 		repoCounters[r.Name] = &repoCounter{}
@@ -31,75 +118,73 @@ func mirror(cfg config, r repo) (string, error) {
 	repoCountersMu.Unlock()
 
 	if _, err := os.Stat(repoPath); err == nil {
-		// Directory exists, update.
-		cmd := exec.Command("git", "remote", "update", "--prune")
+		cmd := exec.CommandContext(ctx, "git", "remote", "update", "--prune")
 		cmd.Dir = repoPath
 		out, err := cmd.CombinedOutput()
 		outStr = string(out)
 		if err != nil {
-			return "", fmt.Errorf("failed to update remote in %s: %w", repoPath, err)
+			return outStr, fmt.Errorf("failed to update remote in %s: %w", repoPath, err)
 		}
 
 	} else if os.IsNotExist(err) {
-		// Clone
-		parent := path.Dir(repoPath)
+		parent := filepath.Dir(repoPath)
 		if err := os.MkdirAll(parent, 0755); err != nil {
 			return "", fmt.Errorf("failed to create parent directory for cloning %s, %s", repoPath, err)
 		}
-		cmd := exec.Command("git", "clone", "--mirror", r.Origin, repoPath)
+		cmd := exec.CommandContext(ctx, "git", "clone", "--mirror", r.Origin, repoPath)
 		cmd.Dir = parent
 		out, err := cmd.CombinedOutput()
 		if err != nil {
-			return "", fmt.Errorf("failed to clone %s: %w", r.Origin, err)
+			return "", fmt.Errorf("failed to clone %s: %w\noutput: %s", r.Origin, err, truncateOutput(string(out)))
 		}
 		return string(out), err
 	} else {
 		return "", fmt.Errorf("failed to stat %s, %s", repoPath, err)
 	}
 
-	// Commit-graph is cheap and safe to run after every fetch
-	if err := refreshCommitGraph(cfg, r); err != nil {
+	if err := refreshCommitGraph(ctx, cfg, r); err != nil {
 		log.Printf("error refreshing commit-graph for %s: %s", r.Name, err)
 	}
 
-	// Multi-pack-index with bitmap runs every N fetches
-	if r.MultiPackIndexInterval > 0 && counter.fetchCount%uint64(r.MultiPackIndexInterval) == 0 {
-		if err := refreshMultiPackIndex(cfg, r); err != nil {
+	count := counter.fetchCount.Load()
+	if r.MultiPackIndexInterval > 0 && count%uint64(r.MultiPackIndexInterval) == 0 {
+		if err := refreshMultiPackIndex(ctx, cfg, r); err != nil {
 			log.Printf("error refreshing multi-pack index for %s: %s", r.Name, err)
 		} else {
-			log.Printf("successfully refreshed multi-pack index for %s (fetch #%d)", r.Name, counter.fetchCount)
+			log.Printf("successfully refreshed multi-pack index for %s (fetch #%d)", r.Name, count)
 		}
 	}
 
-	// Increment fetch counter (only on successful fetch)
-	counter.mu.Lock()
-	counter.fetchCount++
-	counter.mu.Unlock()
+	counter.fetchCount.Add(1)
 
 	return outStr, nil
 }
 
-func refreshCommitGraph(cfg config, r repo) error {
-	repoPath := path.Join(cfg.BasePath, r.Name)
+func refreshCommitGraph(ctx context.Context, cfg config, r repo) error {
+	repoPath, err := safeRepoPath(cfg.BasePath, r.Name)
+	if err != nil {
+		return err
+	}
 
-	cmd := exec.Command("git", "commit-graph", "write", "--reachable")
+	cmd := exec.CommandContext(ctx, "git", "commit-graph", "write", "--reachable")
 	cmd.Dir = repoPath
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to write commit-graph for %s: %s, output: %s", repoPath, err, string(out))
+		return fmt.Errorf("failed to write commit-graph for %s: %s, output: %s", repoPath, err, truncateOutput(string(out)))
 	}
 
 	return nil
 }
 
-// Write multi-pack-index with bitmap across all packs without full repack
-func refreshMultiPackIndex(cfg config, r repo) error {
-	repoPath := path.Join(cfg.BasePath, r.Name)
+func refreshMultiPackIndex(ctx context.Context, cfg config, r repo) error {
+	repoPath, err := safeRepoPath(cfg.BasePath, r.Name)
+	if err != nil {
+		return err
+	}
 
-	// Run git multi-pack-index write with bitmap
-	mpiCmd := exec.Command("git", "multi-pack-index", "write", "--bitmap")
-	mpiCmd.Dir = repoPath
-	if out, err := mpiCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to write multi-pack-index %s: %s, output: %s", repoPath, err, string(out))
+	cmd := exec.CommandContext(ctx, "git", "multi-pack-index", "write", "--bitmap")
+	cmd.Dir = repoPath
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to write multi-pack-index %s: %s, output: %s", repoPath, err, truncateOutput(string(out)))
 	}
 
 	return nil

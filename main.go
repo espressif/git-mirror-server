@@ -2,24 +2,23 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"log"
 	"net/http"
 	"net/http/cgi"
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
 
 func main() {
-	// Set up signal handler to reap zombie processes
-	// This prevents git processes spawned by CGI handler from becoming zombies
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGCHLD)
 	go func() {
 		for range sigChan {
-			// Reap all zombie children
 			for {
 				var status syscall.WaitStatus
 				pid, err := syscall.Wait4(-1, &status, syscall.WNOHANG, nil)
@@ -30,7 +29,6 @@ func main() {
 		}
 	}()
 
-	// Parse config.
 	if len(os.Args) != 2 {
 		log.Fatal("please specify the path to a config file, an example config is available at https://github.com/espressif/git-mirror-server/blob/master/example-config.toml")
 	}
@@ -43,14 +41,28 @@ func main() {
 		log.Fatalf("failed to create %s, %s", cfg.BasePath, err)
 	}
 
-	// Run background threads to keep mirrors up to date.
-	// Multi-pack index and bitmap index refreshes are now handled
-	// automatically within the mirror function based on fetch counts.
+	healthCheck(cfg, repos)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	shutdownChan := make(chan os.Signal, 1)
+	signal.Notify(shutdownChan, syscall.SIGTERM, syscall.SIGINT)
+
+	var wg sync.WaitGroup
 	for _, r := range repos {
+		wg.Add(1)
 		go func(r repo) {
+			defer wg.Done()
+			timer := time.NewTimer(0)
+			defer timer.Stop()
+			// Drain the initial fire — first iteration runs immediately via the loop body
+			if !timer.Stop() {
+				<-timer.C
+			}
 			for {
 				log.Printf("updating %s", r.Name)
-				out, err := mirror(cfg, r)
+				out, err := mirror(ctx, cfg, r)
 				scanner := bufio.NewScanner(strings.NewReader(out))
 				for scanner.Scan() {
 					log.Printf("%s: %s", r.Name, scanner.Text())
@@ -60,12 +72,17 @@ func main() {
 				} else {
 					log.Printf("updated %s", r.Name)
 				}
-				time.Sleep(r.Interval.Duration)
+				timer.Reset(r.Interval.Duration)
+				select {
+				case <-ctx.Done():
+					log.Printf("stopping updates for %s", r.Name)
+					return
+				case <-timer.C:
+				}
 			}
 		}(r)
 	}
 
-	// Set up git http-backend CGI handler
 	gitBackend := &cgi.Handler{
 		Path: "/usr/bin/git",
 		Args: []string{"http-backend"},
@@ -76,20 +93,43 @@ func main() {
 		},
 	}
 
-	// Create a semaphore to limit concurrent connections
 	semaphore := make(chan struct{}, cfg.MaxConcurrentConnections)
 
-	// Wrap the handler with concurrent connection limiting
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// Acquire semaphore
-		semaphore <- struct{}{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case semaphore <- struct{}{}:
+		case <-r.Context().Done():
+			http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		defer func() { <-semaphore }()
-
 		gitBackend.ServeHTTP(w, r)
 	})
 
+	srv := &http.Server{
+		Addr:    cfg.ListenAddr,
+		Handler: mux,
+	}
+
+	go func() {
+		sig := <-shutdownChan
+		log.Printf("received %s, shutting down", sig)
+		cancel()
+
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer shutdownCancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("HTTP server shutdown error: %s, forcing close", err)
+			srv.Close()
+		}
+	}()
+
 	log.Printf("starting git HTTP server on %s", cfg.ListenAddr)
-	if err := http.ListenAndServe(cfg.ListenAddr, nil); err != nil {
+	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
 		log.Fatalf("failed to start server, %s", err)
 	}
+
+	wg.Wait()
+	log.Printf("shutdown complete")
 }
