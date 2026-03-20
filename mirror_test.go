@@ -282,6 +282,31 @@ func TestMirrorMultiPackIndexOnInterval(t *testing.T) {
 	}
 }
 
+func TestRefreshMultiPackIndexNoPackFiles(t *testing.T) {
+	srcDir, cfg, r := setupTestEnv(t)
+	bareDir := filepath.Join(cfg.BasePath, r.Name)
+	if err := os.MkdirAll(filepath.Dir(bareDir), 0755); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, filepath.Dir(bareDir), "clone", "--mirror", srcDir, bareDir)
+
+	// Remove all files in objects/pack to simulate a repo with only loose objects
+	packDir := filepath.Join(bareDir, "objects", "pack")
+	entries, err := os.ReadDir(packDir)
+	if err != nil {
+		t.Fatalf("failed to read pack directory: %s", err)
+	}
+	for _, e := range entries {
+		if err := os.Remove(filepath.Join(packDir, e.Name())); err != nil {
+			t.Fatalf("failed to remove pack file %s: %s", e.Name(), err)
+		}
+	}
+
+	if err := refreshMultiPackIndex(context.Background(), cfg, r); err != nil {
+		t.Fatalf("refreshMultiPackIndex should be a no-op when no pack files exist: %s", err)
+	}
+}
+
 func TestMirrorCloneFailureRemovesPartialDir(t *testing.T) {
 	_, cfg, r := setupTestEnv(t)
 	r.Origin = "/nonexistent/repo"

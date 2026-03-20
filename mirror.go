@@ -178,10 +178,34 @@ func refreshCommitGraph(ctx context.Context, cfg config, r repo) error {
 	return nil
 }
 
+func hasPackFiles(repoPath string) (bool, error) {
+	entries, err := os.ReadDir(filepath.Join(repoPath, "objects", "pack"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".pack") {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func refreshMultiPackIndex(ctx context.Context, cfg config, r repo) error {
 	repoPath, err := safeRepoPath(cfg.BasePath, r.Name)
 	if err != nil {
 		return err
+	}
+
+	hasPacks, err := hasPackFiles(repoPath)
+	if err != nil {
+		return fmt.Errorf("failed to check pack files in %s: %w", repoPath, err)
+	}
+	if !hasPacks {
+		return nil
 	}
 
 	cmd := exec.CommandContext(ctx, "git", "multi-pack-index", "write", "--bitmap")
