@@ -311,6 +311,19 @@ func TestRefreshMultiPackIndexNoPackFiles(t *testing.T) {
 	}
 }
 
+func TestPrunePacked(t *testing.T) {
+	srcDir, cfg, r := setupTestEnv(t)
+	bareDir := filepath.Join(cfg.BasePath, r.Name)
+	if err := os.MkdirAll(filepath.Dir(bareDir), 0755); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, filepath.Dir(bareDir), "clone", "--mirror", srcDir, bareDir)
+
+	if err := prunePacked(context.Background(), cfg, r); err != nil {
+		t.Fatalf("prunePacked failed: %s", err)
+	}
+}
+
 func TestMirrorCloneFailureRemovesPartialDir(t *testing.T) {
 	_, cfg, r := setupTestEnv(t)
 	r.Origin = "/nonexistent/repo"

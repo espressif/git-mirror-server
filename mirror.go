@@ -151,6 +151,9 @@ func mirror(ctx context.Context, cfg config, r repo) (string, error) {
 
 	count := counter.fetchCount.Load()
 	if r.MultiPackIndexInterval > 0 && count > 0 && count%uint64(r.MultiPackIndexInterval) == 0 {
+		if err := prunePacked(ctx, cfg, r); err != nil {
+			log.Printf("error pruning packed objects for %s: %s", r.Name, err)
+		}
 		if err := refreshMultiPackIndex(ctx, cfg, r); err != nil {
 			log.Printf("error refreshing multi-pack index for %s: %s", r.Name, err)
 		} else {
@@ -212,6 +215,21 @@ func refreshMultiPackIndex(ctx context.Context, cfg config, r repo) error {
 	cmd.Dir = repoPath
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to write multi-pack-index %s: %s, output: %s", repoPath, err, truncateOutput(string(out)))
+	}
+
+	return nil
+}
+
+func prunePacked(ctx context.Context, cfg config, r repo) error {
+	repoPath, err := safeRepoPath(cfg.BasePath, r.Name)
+	if err != nil {
+		return err
+	}
+
+	cmd := exec.CommandContext(ctx, "git", "prune-packed")
+	cmd.Dir = repoPath
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to prune packed objects in %s: %s, output: %s", repoPath, err, truncateOutput(string(out)))
 	}
 
 	return nil
