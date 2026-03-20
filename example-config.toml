@@ -19,6 +19,12 @@ BasePath = "/opt/git-mirror/data"
 # Defaults to 32 if not specified.
 MaxConcurrentConnections = 32
 
+# SentryDSN enables Sentry error reporting. When set, unexpected errors
+# (failed clones, fetch failures, health-check failures, maintenance errors)
+# are reported to Sentry with repo name and operation tags.
+# Disabled by default (empty string).
+# SentryDSN = "https://examplePublicKey@o0.ingest.sentry.io/0"
+
 # An example of a public mirror taking defaults from above.  The Name is
 # generated from the URL by just taking the host and path.
 #

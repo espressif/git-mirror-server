@@ -72,6 +72,7 @@ services:
 - **`MaxConcurrentConnections`** (int, default: `32`) - Limits the number of concurrent HTTP connections to prevent overload
 - **`MultiPackIndexInterval`** (int, default: `0`) - Number of fetches after which to refresh the multi-pack index; Disabled by default (`0`)
 - **`BitmapIndexInterval`** (int, default: `0`) - Number of fetches after which to rebuild the bitmap index with full repack; Disabled by default (`0`)
+- **`SentryDSN`** (string, default: empty) - Sentry DSN for error reporting. When set, clone/fetch failures, health-check failures, and maintenance errors are reported to Sentry with repo and operation tags
 
 ### Repository Settings
 
