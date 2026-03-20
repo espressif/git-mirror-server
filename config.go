@@ -22,6 +22,7 @@ type config struct {
 	MultiPackIndexInterval   int
 	BasePath                 string
 	MaxConcurrentConnections int
+	SentryDSN                string
 	Repo                     []repo
 }
 

@@ -17,6 +17,8 @@ Git mirror server in Go. Clones repos as `--mirror`, serves them via `git http-b
 - All maintenance git operations (`commit-graph write`, `multi-pack-index write`) must be safe for concurrent HTTP readers — no deleting pack files. Never use `git repack -d` in the serving path.
 - Background goroutines run one per repo with no parallelism within a repo, but `git http-backend` serves concurrent reads on the same repo directory simultaneously.
 
-## Repository
+## Pull Requests
 
 This project is developed in https://github.com/espressif/git-mirror-server. Only create PRs to this repo.
+
+When creating or updating a PR, request a review from `copilot` (`gh pr edit --add-reviewer copilot` or pass `--reviewer copilot` on create). After the review is posted, read the comments (`gh api repos/espressif/git-mirror-server/pulls/<number>/comments`), address any relevant findings, and push fixes before notifying the user.

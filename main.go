@@ -41,6 +41,11 @@ func main() {
 		log.Fatalf("failed to create %s, %s", cfg.BasePath, err)
 	}
 
+	if err := initSentry(cfg.SentryDSN); err != nil {
+		log.Fatalf("sentry init: %s", err)
+	}
+	defer flushSentry()
+
 	healthCheck(cfg, repos)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -69,6 +74,7 @@ func main() {
 				}
 				if err != nil {
 					log.Printf("error updating %s, %s", r.Name, err)
+					captureError(err, r.Name, "mirror")
 				} else {
 					log.Printf("updated %s", r.Name)
 				}

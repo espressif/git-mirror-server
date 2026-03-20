@@ -62,7 +62,9 @@ func healthCheck(cfg config, repos map[string]repo) {
 		cmd.Dir = repoPath
 		if out, err := cmd.CombinedOutput(); err != nil {
 			cancel()
-			log.Printf("warning: %s is not a valid git repo (rev-parse failed: %s, output: %s), removing", name, err, truncateOutput(string(out)))
+			revParseErr := fmt.Errorf("repo %s is not a valid git repo (rev-parse failed: %w, output: %s)", name, err, truncateOutput(string(out)))
+			log.Printf("warning: %s, removing", revParseErr)
+			captureError(revParseErr, name, "health-check")
 			if err := os.RemoveAll(repoPath); err != nil {
 				log.Printf("error removing %s: %s", repoPath, err)
 			}
@@ -73,7 +75,9 @@ func healthCheck(cfg config, repos map[string]repo) {
 		cmd.Dir = repoPath
 		if out, err := cmd.CombinedOutput(); err != nil {
 			cancel()
-			log.Printf("warning: %s failed fsck (%s, output: %s), removing", name, err, truncateOutput(string(out)))
+			fsckErr := fmt.Errorf("repo %s failed fsck: %w, output: %s", name, err, truncateOutput(string(out)))
+			log.Printf("warning: %s, removing", fsckErr)
+			captureError(fsckErr, name, "health-check")
 			if err := os.RemoveAll(repoPath); err != nil {
 				log.Printf("error removing %s: %s", repoPath, err)
 			}
@@ -147,15 +151,18 @@ func mirror(ctx context.Context, cfg config, r repo) (string, error) {
 
 	if err := refreshCommitGraph(ctx, cfg, r); err != nil {
 		log.Printf("error refreshing commit-graph for %s: %s", r.Name, err)
+		captureError(err, r.Name, "commit-graph")
 	}
 
 	count := counter.fetchCount.Load()
 	if r.MultiPackIndexInterval > 0 && count > 0 && count%uint64(r.MultiPackIndexInterval) == 0 {
 		if err := prunePacked(ctx, cfg, r); err != nil {
 			log.Printf("error pruning packed objects for %s: %s", r.Name, err)
+			captureError(err, r.Name, "prune-packed")
 		}
 		if err := refreshMultiPackIndex(ctx, cfg, r); err != nil {
 			log.Printf("error refreshing multi-pack index for %s: %s", r.Name, err)
+			captureError(err, r.Name, "multi-pack-index")
 		} else {
 			log.Printf("successfully refreshed multi-pack index for %s (fetch #%d)", r.Name, count)
 		}
