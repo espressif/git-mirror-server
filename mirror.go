@@ -135,6 +135,9 @@ func mirror(ctx context.Context, cfg config, r repo) (string, error) {
 		cmd.Dir = parent
 		out, err := cmd.CombinedOutput()
 		if err != nil {
+			if rmErr := os.RemoveAll(repoPath); rmErr != nil {
+				log.Printf("error cleaning up partial clone directory %s: %s", repoPath, rmErr)
+			}
 			return "", fmt.Errorf("failed to clone %s: %w\noutput: %s", r.Origin, err, truncateOutput(string(out)))
 		}
 		return string(out), err

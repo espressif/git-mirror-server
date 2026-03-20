@@ -281,3 +281,19 @@ func TestMirrorMultiPackIndexOnInterval(t *testing.T) {
 		t.Fatal("multi-pack-index should NOT exist after second update (fetchCount=1)")
 	}
 }
+
+func TestMirrorCloneFailureRemovesPartialDir(t *testing.T) {
+	_, cfg, r := setupTestEnv(t)
+	r.Origin = "/nonexistent/repo"
+
+	repoPath := filepath.Join(cfg.BasePath, r.Name)
+
+	_, err := mirror(context.Background(), cfg, r)
+	if err == nil {
+		t.Fatal("expected clone to fail with invalid origin")
+	}
+
+	if _, statErr := os.Stat(repoPath); !os.IsNotExist(statErr) {
+		t.Fatal("partial clone directory should have been removed after failure")
+	}
+}
