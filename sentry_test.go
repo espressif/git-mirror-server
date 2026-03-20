@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,6 +50,50 @@ func TestCaptureErrorSetsTags(t *testing.T) {
 	}
 	if ev.Tags["operation"] != "clone" {
 		t.Errorf("expected operation tag 'clone', got %q", ev.Tags["operation"])
+	}
+}
+
+func TestSanitizeURLs(t *testing.T) {
+	tests := []struct {
+		name, input, want string
+	}{
+		{"no url", "plain error", "plain error"},
+		{"url without creds", "failed to clone https://github.com/org/repo.git: exit 128", "failed to clone https://github.com/org/repo.git: exit 128"},
+		{"url with token", "clone https://x-token:ghp_secret123@github.com/org/repo.git failed", "clone https://REDACTED@github.com/org/repo.git failed"},
+		{"url with user:pass", "fetch https://user:pass@example.com/r.git err", "fetch https://REDACTED@example.com/r.git err"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeURLs(tt.input)
+			if got != tt.want {
+				t.Errorf("sanitizeURLs(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCaptureErrorSanitizesCredentials(t *testing.T) {
+	transport := &TransportMock{}
+	if err := sentry.Init(sentry.ClientOptions{
+		Dsn:       "https://key@sentry.io/1",
+		Transport: transport,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer sentry.Init(sentry.ClientOptions{Dsn: ""})
+
+	testErr := errors.New("failed to clone https://token:ghp_secret@github.com/org/repo.git: exit 128")
+	captureError(testErr, "my-repo", "clone")
+
+	if len(transport.events) == 0 {
+		t.Fatal("expected at least one event captured")
+	}
+	msg := transport.events[0].Exception[0].Value
+	if strings.Contains(msg, "ghp_secret") {
+		t.Errorf("captured event should not contain credentials, got: %s", msg)
+	}
+	if !strings.Contains(msg, "REDACTED") {
+		t.Errorf("captured event should contain REDACTED placeholder, got: %s", msg)
 	}
 }
 
