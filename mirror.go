@@ -135,6 +135,9 @@ func mirror(ctx context.Context, cfg config, r repo) (string, error) {
 		cmd.Dir = parent
 		out, err := cmd.CombinedOutput()
 		if err != nil {
+			if rmErr := os.RemoveAll(repoPath); rmErr != nil {
+				log.Printf("error cleaning up partial clone directory %s: %s", repoPath, rmErr)
+			}
 			return "", fmt.Errorf("failed to clone %s: %w\noutput: %s", r.Origin, err, truncateOutput(string(out)))
 		}
 		return string(out), err
@@ -147,7 +150,10 @@ func mirror(ctx context.Context, cfg config, r repo) (string, error) {
 	}
 
 	count := counter.fetchCount.Load()
-	if r.MultiPackIndexInterval > 0 && count%uint64(r.MultiPackIndexInterval) == 0 {
+	if r.MultiPackIndexInterval > 0 && count > 0 && count%uint64(r.MultiPackIndexInterval) == 0 {
+		if err := prunePacked(ctx, cfg, r); err != nil {
+			log.Printf("error pruning packed objects for %s: %s", r.Name, err)
+		}
 		if err := refreshMultiPackIndex(ctx, cfg, r); err != nil {
 			log.Printf("error refreshing multi-pack index for %s: %s", r.Name, err)
 		} else {
@@ -175,16 +181,55 @@ func refreshCommitGraph(ctx context.Context, cfg config, r repo) error {
 	return nil
 }
 
+func hasPackFiles(repoPath string) (bool, error) {
+	entries, err := os.ReadDir(filepath.Join(repoPath, "objects", "pack"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".pack") {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func refreshMultiPackIndex(ctx context.Context, cfg config, r repo) error {
 	repoPath, err := safeRepoPath(cfg.BasePath, r.Name)
 	if err != nil {
 		return err
 	}
 
+	hasPacks, err := hasPackFiles(repoPath)
+	if err != nil {
+		return fmt.Errorf("failed to check pack files in %s: %w", repoPath, err)
+	}
+	if !hasPacks {
+		return nil
+	}
+
 	cmd := exec.CommandContext(ctx, "git", "multi-pack-index", "write", "--bitmap")
 	cmd.Dir = repoPath
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to write multi-pack-index %s: %s, output: %s", repoPath, err, truncateOutput(string(out)))
+	}
+
+	return nil
+}
+
+func prunePacked(ctx context.Context, cfg config, r repo) error {
+	repoPath, err := safeRepoPath(cfg.BasePath, r.Name)
+	if err != nil {
+		return err
+	}
+
+	cmd := exec.CommandContext(ctx, "git", "prune-packed")
+	cmd.Dir = repoPath
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to prune packed objects in %s: %s, output: %s", repoPath, err, truncateOutput(string(out)))
 	}
 
 	return nil

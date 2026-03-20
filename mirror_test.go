@@ -258,18 +258,13 @@ func TestMirrorMultiPackIndexOnInterval(t *testing.T) {
 	gitCmd(t, bareDir, "repack", "-d")
 	midxPath := filepath.Join(bareDir, "objects", "pack", "multi-pack-index")
 
-	// First update (fetchCount=0, 0%2==0 → writes MIDX)
+	// First update (fetchCount=0, skipped to avoid restart burst)
 	gitCmd(t, srcDir, "commit", "--allow-empty", "-m", "second")
 	if _, err := mirror(context.Background(), cfg, r); err != nil {
 		t.Fatalf("mirror update 1 failed: %s", err)
 	}
-	if _, err := os.Stat(midxPath); os.IsNotExist(err) {
-		t.Fatal("multi-pack-index should exist after first update (fetchCount=0)")
-	}
-
-	// Remove MIDX to verify it's NOT recreated on next update
-	if err := os.Remove(midxPath); err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(midxPath); !os.IsNotExist(err) {
+		t.Fatal("multi-pack-index should NOT exist after first update (fetchCount=0)")
 	}
 
 	// Second update (fetchCount=1, 1%2!=0 → should NOT write MIDX)
@@ -279,5 +274,68 @@ func TestMirrorMultiPackIndexOnInterval(t *testing.T) {
 	}
 	if _, err := os.Stat(midxPath); !os.IsNotExist(err) {
 		t.Fatal("multi-pack-index should NOT exist after second update (fetchCount=1)")
+	}
+
+	// Third update (fetchCount=2, 2%2==0 → writes MIDX)
+	gitCmd(t, srcDir, "commit", "--allow-empty", "-m", "fourth")
+	if _, err := mirror(context.Background(), cfg, r); err != nil {
+		t.Fatalf("mirror update 3 failed: %s", err)
+	}
+	if _, err := os.Stat(midxPath); os.IsNotExist(err) {
+		t.Fatal("multi-pack-index should exist after third update (fetchCount=2)")
+	}
+}
+
+func TestRefreshMultiPackIndexNoPackFiles(t *testing.T) {
+	srcDir, cfg, r := setupTestEnv(t)
+	bareDir := filepath.Join(cfg.BasePath, r.Name)
+	if err := os.MkdirAll(filepath.Dir(bareDir), 0755); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, filepath.Dir(bareDir), "clone", "--mirror", srcDir, bareDir)
+
+	// Remove all files in objects/pack to simulate a repo with only loose objects
+	packDir := filepath.Join(bareDir, "objects", "pack")
+	entries, err := os.ReadDir(packDir)
+	if err != nil {
+		t.Fatalf("failed to read pack directory: %s", err)
+	}
+	for _, e := range entries {
+		if err := os.Remove(filepath.Join(packDir, e.Name())); err != nil {
+			t.Fatalf("failed to remove pack file %s: %s", e.Name(), err)
+		}
+	}
+
+	if err := refreshMultiPackIndex(context.Background(), cfg, r); err != nil {
+		t.Fatalf("refreshMultiPackIndex should be a no-op when no pack files exist: %s", err)
+	}
+}
+
+func TestPrunePacked(t *testing.T) {
+	srcDir, cfg, r := setupTestEnv(t)
+	bareDir := filepath.Join(cfg.BasePath, r.Name)
+	if err := os.MkdirAll(filepath.Dir(bareDir), 0755); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, filepath.Dir(bareDir), "clone", "--mirror", srcDir, bareDir)
+
+	if err := prunePacked(context.Background(), cfg, r); err != nil {
+		t.Fatalf("prunePacked failed: %s", err)
+	}
+}
+
+func TestMirrorCloneFailureRemovesPartialDir(t *testing.T) {
+	_, cfg, r := setupTestEnv(t)
+	r.Origin = "/nonexistent/repo"
+
+	repoPath := filepath.Join(cfg.BasePath, r.Name)
+
+	_, err := mirror(context.Background(), cfg, r)
+	if err == nil {
+		t.Fatal("expected clone to fail with invalid origin")
+	}
+
+	if _, statErr := os.Stat(repoPath); !os.IsNotExist(statErr) {
+		t.Fatal("partial clone directory should have been removed after failure")
 	}
 }
