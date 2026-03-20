@@ -150,7 +150,7 @@ func mirror(ctx context.Context, cfg config, r repo) (string, error) {
 	}
 
 	count := counter.fetchCount.Load()
-	if r.MultiPackIndexInterval > 0 && count%uint64(r.MultiPackIndexInterval) == 0 {
+	if r.MultiPackIndexInterval > 0 && count > 0 && count%uint64(r.MultiPackIndexInterval) == 0 {
 		if err := refreshMultiPackIndex(ctx, cfg, r); err != nil {
 			log.Printf("error refreshing multi-pack index for %s: %s", r.Name, err)
 		} else {

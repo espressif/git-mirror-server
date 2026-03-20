@@ -258,18 +258,13 @@ func TestMirrorMultiPackIndexOnInterval(t *testing.T) {
 	gitCmd(t, bareDir, "repack", "-d")
 	midxPath := filepath.Join(bareDir, "objects", "pack", "multi-pack-index")
 
-	// First update (fetchCount=0, 0%2==0 → writes MIDX)
+	// First update (fetchCount=0, skipped to avoid restart burst)
 	gitCmd(t, srcDir, "commit", "--allow-empty", "-m", "second")
 	if _, err := mirror(context.Background(), cfg, r); err != nil {
 		t.Fatalf("mirror update 1 failed: %s", err)
 	}
-	if _, err := os.Stat(midxPath); os.IsNotExist(err) {
-		t.Fatal("multi-pack-index should exist after first update (fetchCount=0)")
-	}
-
-	// Remove MIDX to verify it's NOT recreated on next update
-	if err := os.Remove(midxPath); err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(midxPath); !os.IsNotExist(err) {
+		t.Fatal("multi-pack-index should NOT exist after first update (fetchCount=0)")
 	}
 
 	// Second update (fetchCount=1, 1%2!=0 → should NOT write MIDX)
@@ -279,6 +274,15 @@ func TestMirrorMultiPackIndexOnInterval(t *testing.T) {
 	}
 	if _, err := os.Stat(midxPath); !os.IsNotExist(err) {
 		t.Fatal("multi-pack-index should NOT exist after second update (fetchCount=1)")
+	}
+
+	// Third update (fetchCount=2, 2%2==0 → writes MIDX)
+	gitCmd(t, srcDir, "commit", "--allow-empty", "-m", "fourth")
+	if _, err := mirror(context.Background(), cfg, r); err != nil {
+		t.Fatalf("mirror update 3 failed: %s", err)
+	}
+	if _, err := os.Stat(midxPath); os.IsNotExist(err) {
+		t.Fatal("multi-pack-index should exist after third update (fetchCount=2)")
 	}
 }
 
