@@ -15,20 +15,6 @@ import (
 )
 
 func main() {
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGCHLD)
-	go func() {
-		for range sigChan {
-			for {
-				var status syscall.WaitStatus
-				pid, err := syscall.Wait4(-1, &status, syscall.WNOHANG, nil)
-				if err != nil || pid <= 0 {
-					break
-				}
-			}
-		}
-	}()
-
 	if len(os.Args) != 2 {
 		log.Fatal("please specify the path to a config file, an example config is available at https://github.com/espressif/git-mirror-server/blob/master/example-config.toml")
 	}
