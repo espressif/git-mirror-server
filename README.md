@@ -70,8 +70,7 @@ services:
 - **`Interval`** (duration, default: `15m`) - Default interval for updating mirrors; can be overridden per repository
 - **`BasePath`** (string, default: `.`) - Base path for storing mirror data, can be absolute or relative
 - **`MaxConcurrentConnections`** (int, default: `32`) - Limits the number of concurrent HTTP connections to prevent overload
-- **`MultiPackIndexInterval`** (int, default: `0`) - Number of fetches after which to refresh the multi-pack index; Disabled by default (`0`)
-- **`BitmapIndexInterval`** (int, default: `0`) - Number of fetches after which to rebuild the bitmap index with full repack; Disabled by default (`0`)
+- **`MultiPackIndexInterval`** (int, default: `0`) - Number of fetches after which to refresh the multi-pack index with bitmap; Disabled by default (`0`)
 - **`SentryDSN`** (string, default: empty) - Sentry DSN for error reporting. When set, clone/fetch failures, health-check failures, and maintenance errors are reported to Sentry with repo and operation tags
 
 ### Repository Settings
@@ -82,16 +81,10 @@ Each `[[Repo]]` section supports:
 - **`Name`** (string, optional) - Custom name for accessing the mirror; auto-generated from Origin if not specified
 - **`Interval`** (duration, optional) - Override the global update interval for this specific repository
 - **`MultiPackIndexInterval`** (int, optional) - Override the global multi-pack index refresh interval for this repository
-- **`BitmapIndexInterval`** (int, optional) - Override the global bitmap index rebuild interval for this repository
 
 ### Performance Optimization
 
-The server uses two index refresh strategies:
-
-1. **Multi-pack index** - Lightweight operation that improves fetch performance without repacking. Runs more frequently (default: 0, disabled).
-2. **Bitmap index** - Full repack with bitmap generation for maximum performance. More resource-intensive, runs less frequently (default: 0, disabled).
-
-Both can be disabled per repository by setting their interval to `0`, or customized based on repository size and usage patterns.
+The server can periodically refresh the **multi-pack index with bitmap** (`git multi-pack-index write --bitmap`). This improves fetch performance without repacking or deleting pack files, making it safe for concurrent HTTP readers. Set `MultiPackIndexInterval` to the number of fetches between refreshes (default: `0`, disabled). Can be customized per repository.
 
 ### Example Configuration
 
