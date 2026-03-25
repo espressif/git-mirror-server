@@ -229,7 +229,7 @@ func refreshMultiPackIndex(ctx context.Context, cfg config, r repo) error {
 	cmd = exec.CommandContext(ctx, "git", "multi-pack-index", "write", "--bitmap")
 	cmd.Dir = repoPath
 	if out, err := cmd.CombinedOutput(); err != nil {
-		log.Printf("warning: failed to write multi-pack bitmap for %s (non-fatal): %s", r.Name, truncateOutput(string(out)))
+		log.Printf("warning: failed to write multi-pack bitmap for %s (non-fatal): err=%v, output=%s", r.Name, err, truncateOutput(string(out)))
 	}
 
 	return nil
