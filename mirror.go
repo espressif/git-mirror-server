@@ -218,10 +218,18 @@ func refreshMultiPackIndex(ctx context.Context, cfg config, r repo) error {
 		return nil
 	}
 
-	cmd := exec.CommandContext(ctx, "git", "multi-pack-index", "write", "--bitmap")
+	cmd := exec.CommandContext(ctx, "git", "multi-pack-index", "write")
 	cmd.Dir = repoPath
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to write multi-pack-index %s: %s, output: %s", repoPath, err, truncateOutput(string(out)))
+	}
+
+	// Bitmap is best-effort: it requires full object closure in packs,
+	// which may not hold in a mirror that receives incremental fetches.
+	cmd = exec.CommandContext(ctx, "git", "multi-pack-index", "write", "--bitmap")
+	cmd.Dir = repoPath
+	if out, err := cmd.CombinedOutput(); err != nil {
+		log.Printf("warning: failed to write multi-pack bitmap for %s (non-fatal): err=%v, output=%s", r.Name, err, truncateOutput(string(out)))
 	}
 
 	return nil

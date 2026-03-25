@@ -286,6 +286,31 @@ func TestMirrorMultiPackIndexOnInterval(t *testing.T) {
 	}
 }
 
+func TestRefreshMultiPackIndexBitmapFailure(t *testing.T) {
+	srcDir, cfg, r := setupTestEnv(t)
+	bareDir := filepath.Join(cfg.BasePath, r.Name)
+	if err := os.MkdirAll(filepath.Dir(bareDir), 0755); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, filepath.Dir(bareDir), "clone", "--mirror", srcDir, bareDir)
+	gitCmd(t, bareDir, "repack", "-d")
+
+	// Add a new commit to the source and fetch it so the mirror has loose
+	// objects not covered by any pack, breaking bitmap closure.
+	gitCmd(t, srcDir, "commit", "--allow-empty", "-m", "extra")
+	gitCmd(t, bareDir, "remote", "update")
+
+	err := refreshMultiPackIndex(context.Background(), cfg, r)
+	if err != nil {
+		t.Fatalf("refreshMultiPackIndex should succeed even when bitmap fails: %s", err)
+	}
+
+	midxPath := filepath.Join(bareDir, "objects", "pack", "multi-pack-index")
+	if _, err := os.Stat(midxPath); os.IsNotExist(err) {
+		t.Fatal("multi-pack-index should still be created when bitmap fails")
+	}
+}
+
 func TestRefreshMultiPackIndexNoPackFiles(t *testing.T) {
 	srcDir, cfg, r := setupTestEnv(t)
 	bareDir := filepath.Join(cfg.BasePath, r.Name)
