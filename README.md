@@ -44,7 +44,7 @@ The docker image is available on Docker Hub [espressif/git-mirror](https://hub.d
 You can run it with docker:
 
 ```
-docker run --rm -ti -v /your_config/path:/config espressif/git-mirror /config/config.toml
+docker run --rm --init -ti -v /your_config/path:/config espressif/git-mirror /config/config.toml
 ```
 
 Or with docker compose, for example:
@@ -53,6 +53,7 @@ Or with docker compose, for example:
 services:
   git-mirror:
     image: espressif/git-mirror
+    init: true
     ports:
       - "8080:8080"
     command: ["/etc/git-mirror/config.toml"]
